@@ -3,9 +3,11 @@ import { VideoStreamController } from "../../../src/media/VideoStreamController.
 import { MediaUdp } from "../../../src/client/voice/MediaUdp.js";
 import { Streamer } from "../../../src/client/Streamer.js";
 import { getInputMetadata, inputHasAudio } from "../../../src/media/streamLivestreamVideo.js";
+import { sendStreamPreview } from "../../../src/media/streamPreview.js";
 import config from "./config.json" with { type: "json" };
 
 const VIDEO_PATH = "/home/unicorns/Stuff/LumaUpscaling/SpiritedAway/SpiritedAway.mkv";
+const PREVIEW_IMAGE = "https://bloomreviewsblog.com/wp-content/uploads/2016/12/open-uri20160812-3094-m7gl4u_36a28be4.jpeg";
 const streamer = new Streamer(new Client());
 let streamController: VideoStreamController | undefined;
 
@@ -33,6 +35,22 @@ streamer.client.on("messageCreate", async (msg: any) => {
     await streamer.joinVoice(msg.guildId, channel.id);
 
     const streamUdpConn = await streamer.createStream();
+    
+    // Set stream preview before starting the video
+    try {
+      console.log(`Setting stream preview for guild:${msg.guildId}:${channel.id}:${streamer.client.user.id}`);
+      await sendStreamPreview(
+        msg.guildId,
+        channel.id,
+        streamer.client.user.id,
+        PREVIEW_IMAGE,
+        config.token
+      );
+      console.log("Stream preview set successfully");
+    } catch (error) {
+      console.error("Failed to set stream preview:", error);
+    }
+
     await playVideo(VIDEO_PATH, streamUdpConn);
   } 
   else if (msg.content === "$pause") {
