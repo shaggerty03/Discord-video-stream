@@ -1,7 +1,6 @@
 import LibAV from "@libav.js/variant-webcodecs";
 import pDebounce from "p-debounce";
 import { Log } from "debug-level";
-import { uid } from "uid";
 import { AVCodecID } from "./LibavCodecId.js";
 import {
     H264Helpers, H264NalUnitTypes,
@@ -182,6 +181,8 @@ libavPromise.then((libav) => {
         idToStream.get(id)?.resume();
     }
 })
+
+const uid = (len = 11) => [...Array(len)].map(() => (Math.random() * 16 | 0).toString(16)).join('');
 
 export async function demux(input: Readable) {
     const loggerInput = new Log("demux:input");
