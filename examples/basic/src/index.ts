@@ -133,6 +133,7 @@ streamer.client.on("messageCreate", async (msg: any) => {
         `🎞️ Frames: ${stats.framesEncoded} (${stats.framesDropped} dropped)`,
         `🏃 Current FPS: ${stats.currentFps}`,
         `📊 Bitrate: ${stats.currentKbps} kbps (avg: ${stats.avgKbps} kbps)`,
+        `🔋 Buffer: ${stats.bufferHealth}%`,
         `⏱️ Duration: ${stats.timestamp}`
       ].join('\n');
       msg.channel.send(message);

@@ -26,6 +26,7 @@ export interface StreamStats {
   avgKbps: number;
   duration: number;
   timestamp: string;
+  bufferHealth: number;
 }
 
 export class VideoStreamController extends EventEmitter {
@@ -50,7 +51,8 @@ export class VideoStreamController extends EventEmitter {
     currentKbps: 0,
     avgKbps: 0,
     duration: 0,
-    timestamp: "00:00:00"
+    timestamp: "00:00:00",
+    bufferHealth: 100
   };
   private lastStatsUpdate = 0;
   private totalBytesProcessed = 0;
@@ -58,8 +60,23 @@ export class VideoStreamController extends EventEmitter {
   private lastFrameCount = 0;
   private lastDroppedFrames = 0;
 
+  private readonly MIN_BITRATE = 2000;  // Minimum bitrate in kbps
+  private readonly MAX_BITRATE = 8500; // Maximum bitrate in kbps
+  private readonly TARGET_BUFFER = 8500; // Target VBV buffer size in kb
+  private readonly ADJUSTMENT_INTERVAL = 10000; // Check every 10 seconds
+  private readonly BITRATE_STEP = 500;  // Step size for bitrate changes in kbps
+  private readonly DROP_THRESHOLD = 0.05;  // 5% drop rate threshold
+  private readonly BUFFER_LOW_THRESHOLD = 30;  // Buffer health threshold for reduction
+  private readonly BUFFER_HIGH_THRESHOLD = 90; // Buffer health threshold for increase
+
+  private currentBitrate: number;
+  private bitrateAdjustTimer?: NodeJS.Timeout;
+  private lastAdjustmentTime = 0;
+  private bufferFullness = 100; // VBV buffer fullness percentage
+
   constructor(private mediaUdp: MediaUdp) {
     super();
+    this.currentBitrate = this.mediaUdp.mediaConnection.streamOptions.bitrateKbps;
   }
 
   getStreamStats(): StreamStats {
@@ -101,6 +118,13 @@ export class VideoStreamController extends EventEmitter {
       // Emit stats update event
       this.emit('statsUpdate', this.getStreamStats());
     }
+
+    // Update buffer health based on FFmpeg output
+    const bufferMatch = progress.toString().match(/buffer=\s*(\d+)%/);
+    if (bufferMatch) {
+      this.bufferFullness = parseInt(bufferMatch[1]);
+      this.stats.bufferHealth = this.bufferFullness;
+    }
   }
 
   private set status(newStatus: StreamStatus) {
@@ -124,6 +148,7 @@ export class VideoStreamController extends EventEmitter {
     this.startTime = Date.now() / 1000;
     this.currentPosition = 0;
     await this.startStream(input, includeAudio, 0);
+    this.startBitrateAdjustment();
     this.status = 'playing';
   }
 
@@ -195,7 +220,8 @@ export class VideoStreamController extends EventEmitter {
       currentKbps: 0,
       avgKbps: 0,
       duration: 0,
-      timestamp: "00:00:00"
+      timestamp: "00:00:00",
+      bufferHealth: 100
     };
     this.lastStatsUpdate = Date.now();
     this.totalBytesProcessed = 0;
@@ -255,23 +281,23 @@ export class VideoStreamController extends EventEmitter {
         '-map', '0:a:0?'  // Select first audio stream (if exists)
       ]);
 
-    // Configure video
+    // Configure video with dynamic bitrate support
     const streamOpts = this.mediaUdp.mediaConnection.streamOptions;
     this.command
       .size(`${streamOpts.width}x${streamOpts.height}`)
       .fpsOutput(streamOpts.fps)
-      .videoBitrate(`${streamOpts.bitrateKbps}k`)
       .videoCodec('libx264')
+      .videoBitrate(`${this.currentBitrate}k`)
       .outputOptions([
         '-tune', 'zerolatency',
         '-pix_fmt', 'yuv420p',
         '-preset', 'ultrafast',
         '-profile:v', 'baseline',
         '-level:v', '3.0',
-        '-maxrate', `${streamOpts.bitrateKbps}k`,
-        '-bufsize', `${streamOpts.bitrateKbps * 2}k`,
-        `-g`, `${streamOpts.fps}`,
-        `-x264-params`, `keyint=${streamOpts.fps}:min-keyint=${streamOpts.fps}:scenecut=0`,
+        '-maxrate', `${this.currentBitrate}k`,
+        '-minrate', `${this.currentBitrate}k`,
+        '-bufsize', `${this.TARGET_BUFFER}k`,
+        '-x264-params', `nal-hrd=cbr:force-cfr=1:keyint=${streamOpts.fps}:min-keyint=${streamOpts.fps}:scenecut=0`,
         '-thread_queue_size', '4096'
       ]);
 
@@ -428,5 +454,79 @@ export class VideoStreamController extends EventEmitter {
     return this.isPaused ? 
       this.pausedAt : 
       (Date.now() / 1000) - this.startTime;
+  }
+
+  private startBitrateAdjustment() {
+    if (this.bitrateAdjustTimer) {
+      clearInterval(this.bitrateAdjustTimer);
+    }
+
+    this.bitrateAdjustTimer = setInterval(() => {
+      this.adjustBitrate();
+    }, this.ADJUSTMENT_INTERVAL);
+  }
+
+  private stopBitrateAdjustment() {
+    if (this.bitrateAdjustTimer) {
+      clearInterval(this.bitrateAdjustTimer);
+      this.bitrateAdjustTimer = undefined;
+    }
+  }
+
+  private async adjustBitrate() {
+    if (!this.command || this.isPaused || this.isStopped) {
+      return;
+    }
+
+    const now = Date.now();
+    const timeDiff = (now - this.lastAdjustmentTime) / 1000;
+    
+    // Calculate metrics
+    const newDroppedFrames = this.stats.framesDropped - this.lastDroppedFrames;
+    const dropRate = newDroppedFrames / (this.stats.currentFps * timeDiff);
+    const bufferHealth = this.bufferFullness;
+    
+    let bitrateChange = 0;
+
+    // Adjust based on dropped frames and buffer health
+    if (dropRate > this.DROP_THRESHOLD || bufferHealth < this.BUFFER_LOW_THRESHOLD) {
+      // Reduce bitrate by one step
+      bitrateChange = -this.BITRATE_STEP;
+    } else if (dropRate === 0 && bufferHealth > this.BUFFER_HIGH_THRESHOLD) {
+      // Increase bitrate by one step
+      bitrateChange = this.BITRATE_STEP;
+    }
+
+    if (bitrateChange !== 0) {
+      // Calculate new bitrate
+      const newBitrate = Math.min(
+        this.MAX_BITRATE,
+        Math.max(
+          this.MIN_BITRATE,
+          this.currentBitrate + bitrateChange
+        )
+      );
+
+      // Only apply if it's different
+      if (newBitrate !== this.currentBitrate) {
+        this.currentBitrate = newBitrate;
+        
+        // Store current position
+        const currentPosition = this.getCurrentPosition();
+        
+        // Restart stream with new bitrate
+        if (this.command) {
+          this.command.kill('SIGKILL');
+          this.cleanupStreams();
+          await this.startStream(this.currentInput!, this.currentIncludeAudio, currentPosition);
+        }
+
+        console.log(`Adjusted bitrate to ${newBitrate}kbps (drop rate: ${(dropRate * 100).toFixed(1)}%, buffer: ${bufferHealth}%)`);
+      }
+    }
+
+    // Update tracking variables
+    this.lastDroppedFrames = this.stats.framesDropped;
+    this.lastAdjustmentTime = now;
   }
 } 
