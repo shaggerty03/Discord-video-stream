@@ -125,6 +125,21 @@ streamer.client.on("messageCreate", async (msg: any) => {
       msg.channel.send("No video is playing");
     }
   }
+  else if (msg.content === "$stats") {
+    if (streamController?.getStatus() !== 'stopped') {
+      const stats = streamController.getStreamStats();
+      const message = [
+        "Stream Statistics:",
+        `🎞️ Frames: ${stats.framesEncoded} (${stats.framesDropped} dropped)`,
+        `🏃 Current FPS: ${stats.currentFps}`,
+        `📊 Bitrate: ${stats.currentKbps} kbps (avg: ${stats.avgKbps} kbps)`,
+        `⏱️ Duration: ${stats.timestamp}`
+      ].join('\n');
+      msg.channel.send(message);
+    } else {
+      msg.channel.send("No video is playing");
+    }
+  }
   else if (msg.content === "$disconnect") {
     if (streamController) {
       streamController.stop();

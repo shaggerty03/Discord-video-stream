@@ -15,6 +15,7 @@ interface FFmpegProgress {
   targetSize: number;
   timemark: string;
   dropFrames?: number;
+  percent?: number;
 }
 
 export interface StreamStats {
@@ -54,6 +55,8 @@ export class VideoStreamController extends EventEmitter {
   private lastStatsUpdate = 0;
   private totalBytesProcessed = 0;
   private lastBytesProcessed = 0;
+  private lastFrameCount = 0;
+  private lastDroppedFrames = 0;
 
   constructor(private mediaUdp: MediaUdp) {
     super();
@@ -68,26 +71,32 @@ export class VideoStreamController extends EventEmitter {
     const timeDiff = (now - this.lastStatsUpdate) / 1000; // in seconds
 
     if (timeDiff >= 1) { // Update stats every second
-      // Update frames info
+      // Update frames and FPS (directly from FFmpeg)
       this.stats.framesEncoded = progress.frames || 0;
-      this.stats.framesDropped = progress.dropFrames || 0;
+      this.stats.currentFps = progress.currentFps || 0;
       
-      // Calculate current FPS
-      this.stats.currentFps = Math.round((progress.frames - (this.lastBytesProcessed || 0)) / timeDiff);
+      // Update bitrates (directly from FFmpeg)
+      this.stats.currentKbps = progress.currentKbps || 0;
       
-      // Calculate bitrates
-      const bytesDiff = progress.targetSize - this.lastBytesProcessed;
-      this.stats.currentKbps = Math.round((bytesDiff * 8) / (timeDiff * 1000));
-      this.stats.avgKbps = Math.round((progress.targetSize * 8) / (progress.timemark * 1000));
+      // Update timestamp and duration
+      this.stats.timestamp = progress.timemark;
       
-      // Update duration and timestamp
-      this.stats.duration = progress.timemark;
-      this.stats.timestamp = this.getCurrentTimestamp();
+      // Convert timemark (HH:MM:SS.mm) to seconds
+      const [timepart, mspart = '0'] = progress.timemark.split('.');
+      const [hours, minutes, seconds] = timepart.split(':').map(Number);
+      const timeInSeconds = (hours * 3600) + (minutes * 60) + seconds + (Number(mspart) / 100);
+      this.stats.duration = timeInSeconds;
+
+      // Calculate average bitrate from total size
+      const totalKbits = (progress.targetSize || 0) * 8; // Convert KB to Kb
+      this.stats.avgKbps = timeInSeconds > 0 ? 
+        Math.round(totalKbits / timeInSeconds) : 
+        0;
 
       // Store values for next update
       this.lastStatsUpdate = now;
-      this.lastBytesProcessed = progress.targetSize;
-      this.totalBytesProcessed = progress.targetSize;
+      this.lastBytesProcessed = progress.targetSize || 0;
+      this.totalBytesProcessed = progress.targetSize || 0;
 
       // Emit stats update event
       this.emit('statsUpdate', this.getStreamStats());
@@ -165,6 +174,16 @@ export class VideoStreamController extends EventEmitter {
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   }
 
+  private parseStderr(line: string) {
+    // Parse frame stats from lines like:
+    // frame=  129 fps= 30 q=26.0 size=     633kB time=00:00:04.89 bitrate=1060.4kbits/s dup=26 drop=0
+    const dropMatch = line.match(/drop=(\d+)/);
+    if (dropMatch) {
+      this.lastDroppedFrames = parseInt(dropMatch[1]);
+      this.stats.framesDropped = this.lastDroppedFrames;
+    }
+  }
+
   private async startStream(input: string, includeAudio: boolean, seekTime: number = 0) {
     this.output = new PassThrough();
 
@@ -181,19 +200,25 @@ export class VideoStreamController extends EventEmitter {
     this.lastStatsUpdate = Date.now();
     this.totalBytesProcessed = 0;
     this.lastBytesProcessed = 0;
+    this.lastFrameCount = 0;
+    this.lastDroppedFrames = 0;
 
     // Create FFmpeg command with more robust configuration
     this.command = ffmpeg(input)
-      .addInputOption('-re')  // Read input at native framerate
-      .addInputOption('-hwaccel', 'auto')  // Enable hardware acceleration if available
-      .addInputOption('-analyzeduration', '20000000')  // Increase analyze duration
-      .addInputOption('-probesize', '100000000')  // Increase probe size
-      .addOption('-loglevel', 'warning')
+      .addInputOption('-re')
+      .addInputOption('-hwaccel', 'auto')
+      .addInputOption('-analyzeduration', '20000000')
+      .addInputOption('-probesize', '100000000')
+      .addOption('-stats')
+      .addOption('-loglevel', 'info')
       .on('start', (commandLine) => {
         console.log('FFmpeg started with command:', commandLine);
       })
       .on('progress', (progress) => {
         this.updateStats(progress);
+      })
+      .on('stderr', (stderrLine) => {
+        this.parseStderr(stderrLine);
       })
       .on('end', () => {
         // Handle normal end of stream or stop
