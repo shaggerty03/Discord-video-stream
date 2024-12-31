@@ -75,14 +75,52 @@ streamer.client.on("messageCreate", async (msg: any) => {
   }
   else if (msg.content.startsWith("$seek ")) {
     if (streamController?.getStatus() !== 'stopped') {
-      const seconds = parseInt(msg.content.split(" ")[1]);
-      if (isNaN(seconds) || seconds < 0) {
-        msg.channel.send("Please provide a valid number of seconds");
+      const timeArg = msg.content.split(" ")[1].toLowerCase();
+      let seconds: number;
+      let isRelative = false;
+      let timeValue = timeArg;
+
+      // Check if it's a relative seek
+      if (timeArg.startsWith('+') || timeArg.startsWith('-')) {
+        isRelative = true;
+        timeValue = timeArg.slice(1); // Remove the +/- prefix
+      }
+
+      // Parse time with units
+      if (timeValue.endsWith('h')) {
+        seconds = parseInt(timeValue.slice(0, -1)) * 3600;
+      } else if (timeValue.endsWith('m')) {
+        seconds = parseInt(timeValue.slice(0, -1)) * 60;
+      } else if (timeValue.endsWith('s')) {
+        seconds = parseInt(timeValue.slice(0, -1));
+      } else {
+        seconds = parseInt(timeValue);
+      }
+
+      if (isNaN(seconds)) {
+        msg.channel.send("Please provide a valid time (e.g., +30s, -5m, 1h, or just seconds)");
         return;
       }
+
+      // For relative seeks, apply the sign and add to current position
+      if (isRelative) {
+        if (timeArg.startsWith('-')) {
+          seconds = -seconds;
+        }
+        // Get current position in seconds
+        const currentTime = streamController.getCurrentPosition();
+        seconds = Math.max(0, currentTime + seconds); // Prevent seeking before 0
+      }
+
+      if (seconds < 0) {
+        msg.channel.send("Cannot seek to a negative position");
+        return;
+      }
+
       await streamController.seek(seconds);
       const timestamp = streamController.getCurrentTimestamp();
-      msg.channel.send(`Seeked to ${timestamp}`);
+      const seekType = isRelative ? (timeArg.startsWith('-') ? "backward" : "forward") : "to";
+      msg.channel.send(`Seeked ${seekType} ${timestamp}`);
     } else {
       msg.channel.send("No video is playing");
     }
@@ -119,6 +157,26 @@ async function playVideo(video: string, udpConn: MediaUdp) {
     }
     
     streamController = new VideoStreamController(udpConn);
+    
+    streamController.on('statusChange', ({ oldStatus, newStatus }) => {
+      console.log(`Video status changed from ${oldStatus} to ${newStatus}`);
+    });
+    
+    streamController.on('playing', () => {
+      console.log("Playing video");
+      streamer.client.user?.setActivity("Playing video", { type: "WATCHING" });
+    });
+
+    streamController.on('paused', () => {
+      console.log("Video paused");
+      streamer.client.user?.setActivity("Video paused", { type: "WATCHING" });
+    });
+
+    streamController.on('stopped', () => {
+      console.log("Video stopped");
+      streamer.client.user?.setActivity(null);
+    });
+
     await streamController.start(video, includeAudio);
   } catch (e) {
     console.log(e);

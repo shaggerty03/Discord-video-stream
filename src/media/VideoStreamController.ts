@@ -1,11 +1,33 @@
 import ffmpeg from 'fluent-ffmpeg';
 import { PassThrough } from 'stream';
+import { EventEmitter } from 'events';
 import { MediaUdp } from '../client/voice/MediaUdp.js';
 import { demux } from './LibavDemuxer.js';
 import { VideoStream } from './VideoStream.js';
 import { AudioStream } from './AudioStream.js';
 
-export class VideoStreamController {
+export type StreamStatus = 'playing' | 'paused' | 'stopped';
+
+interface FFmpegProgress {
+  frames: number;
+  currentFps: number;
+  currentKbps: number;
+  targetSize: number;
+  timemark: string;
+  dropFrames?: number;
+}
+
+export interface StreamStats {
+  framesEncoded: number;
+  framesDropped: number;
+  currentFps: number;
+  currentKbps: number;
+  avgKbps: number;
+  duration: number;
+  timestamp: string;
+}
+
+export class VideoStreamController extends EventEmitter {
   private command?: ffmpeg.FfmpegCommand;
   private output?: PassThrough;
   private videoStream?: VideoStream;
@@ -17,8 +39,69 @@ export class VideoStreamController {
   private startTime: number = 0;
   private pausedAt: number = 0;
   private currentPosition: number = 0;
+  private _status: StreamStatus = 'stopped';
+  
+  // Statistics tracking
+  private stats: StreamStats = {
+    framesEncoded: 0,
+    framesDropped: 0,
+    currentFps: 0,
+    currentKbps: 0,
+    avgKbps: 0,
+    duration: 0,
+    timestamp: "00:00:00"
+  };
+  private lastStatsUpdate = 0;
+  private totalBytesProcessed = 0;
+  private lastBytesProcessed = 0;
 
-  constructor(private mediaUdp: MediaUdp) {}
+  constructor(private mediaUdp: MediaUdp) {
+    super();
+  }
+
+  getStreamStats(): StreamStats {
+    return { ...this.stats };
+  }
+
+  private updateStats(progress: FFmpegProgress) {
+    const now = Date.now();
+    const timeDiff = (now - this.lastStatsUpdate) / 1000; // in seconds
+
+    if (timeDiff >= 1) { // Update stats every second
+      // Update frames info
+      this.stats.framesEncoded = progress.frames || 0;
+      this.stats.framesDropped = progress.dropFrames || 0;
+      
+      // Calculate current FPS
+      this.stats.currentFps = Math.round((progress.frames - (this.lastBytesProcessed || 0)) / timeDiff);
+      
+      // Calculate bitrates
+      const bytesDiff = progress.targetSize - this.lastBytesProcessed;
+      this.stats.currentKbps = Math.round((bytesDiff * 8) / (timeDiff * 1000));
+      this.stats.avgKbps = Math.round((progress.targetSize * 8) / (progress.timemark * 1000));
+      
+      // Update duration and timestamp
+      this.stats.duration = progress.timemark;
+      this.stats.timestamp = this.getCurrentTimestamp();
+
+      // Store values for next update
+      this.lastStatsUpdate = now;
+      this.lastBytesProcessed = progress.targetSize;
+      this.totalBytesProcessed = progress.targetSize;
+
+      // Emit stats update event
+      this.emit('statsUpdate', this.getStreamStats());
+    }
+  }
+
+  private set status(newStatus: StreamStatus) {
+    if (this._status !== newStatus) {
+      const oldStatus = this._status;
+      this._status = newStatus;
+      this.emit('statusChange', { oldStatus, newStatus });
+      this.emit(newStatus); // Emit individual events for each status
+    }
+  }
 
   async start(input: string, includeAudio: boolean = true) {
     if (this.command) {
@@ -32,6 +115,7 @@ export class VideoStreamController {
     this.startTime = Date.now() / 1000;
     this.currentPosition = 0;
     await this.startStream(input, includeAudio, 0);
+    this.status = 'playing';
   }
 
   async seek(seconds: number) {
@@ -84,6 +168,20 @@ export class VideoStreamController {
   private async startStream(input: string, includeAudio: boolean, seekTime: number = 0) {
     this.output = new PassThrough();
 
+    // Reset statistics
+    this.stats = {
+      framesEncoded: 0,
+      framesDropped: 0,
+      currentFps: 0,
+      currentKbps: 0,
+      avgKbps: 0,
+      duration: 0,
+      timestamp: "00:00:00"
+    };
+    this.lastStatsUpdate = Date.now();
+    this.totalBytesProcessed = 0;
+    this.lastBytesProcessed = 0;
+
     // Create FFmpeg command with more robust configuration
     this.command = ffmpeg(input)
       .addInputOption('-re')  // Read input at native framerate
@@ -93,6 +191,9 @@ export class VideoStreamController {
       .addOption('-loglevel', 'warning')
       .on('start', (commandLine) => {
         console.log('FFmpeg started with command:', commandLine);
+      })
+      .on('progress', (progress) => {
+        this.updateStats(progress);
       })
       .on('end', () => {
         // Handle normal end of stream or stop
@@ -205,6 +306,7 @@ export class VideoStreamController {
     this.cleanupStreams();
     
     this.mediaUdp.mediaConnection.setSpeaking(false);
+    this.status = 'paused';
   }
 
   async resume() {
@@ -218,6 +320,7 @@ export class VideoStreamController {
     // Update the start time to account for the pause duration
     this.startTime = (Date.now() / 1000) - this.pausedAt;
     this.isPaused = false;
+    this.status = 'playing';
   }
 
   stop() {
@@ -243,6 +346,7 @@ export class VideoStreamController {
     } finally {
       // Always perform final cleanup
       this.cleanup();
+      this.status = 'stopped';
       console.log('Stream stopped');
     }
   }
@@ -278,6 +382,7 @@ export class VideoStreamController {
       this.isStopped = false;
       this.startTime = 0;
       this.pausedAt = 0;
+      this.status = 'stopped';
     } catch (error) {
       console.error('Error during cleanup:', error);
     }
@@ -287,10 +392,16 @@ export class VideoStreamController {
     return (!!this.command || this.isPaused) && !this.isStopped;
   }
 
-  getStatus(): 'playing' | 'paused' | 'stopped' {
+  getStatus(): StreamStatus {
+    return this._status;
+  }
+
+  getCurrentPosition(): number {
     if (this.isStopped) {
-      return 'stopped';
+      return 0;
     }
-    return this.isPaused ? 'paused' : 'playing';
+    return this.isPaused ? 
+      this.pausedAt : 
+      (Date.now() / 1000) - this.startTime;
   }
 } 
