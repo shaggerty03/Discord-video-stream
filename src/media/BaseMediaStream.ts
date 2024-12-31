@@ -1,4 +1,4 @@
-import { Log } from "debug-level";
+import { Logger } from "../logger.js";
 import { setTimeout } from "timers/promises";
 import { Writable } from "node:stream";
 import { combineLoHi } from "./utils.js";
@@ -7,9 +7,9 @@ import type { Packet } from "@libav.js/variant-webcodecs";
 export class BaseMediaStream extends Writable {
     private _pts?: number;
     private _syncTolerance: number = 5;
-    private _loggerSend: Log;
-    private _loggerSync: Log;
-    private _loggerSleep: Log;
+    private _loggerSend: Logger;
+    private _loggerSync: Logger;
+    private _loggerSleep: Logger;
 
     private _noSleep: boolean;
     private _startTime?: number;
@@ -18,9 +18,9 @@ export class BaseMediaStream extends Writable {
     public syncStream?: BaseMediaStream;
     constructor(type: string, noSleep: boolean = false) {
         super({ objectMode: true, highWaterMark: 0 });
-        this._loggerSend = new Log(`stream:${type}:send`);
-        this._loggerSync = new Log(`stream:${type}:sync`);
-        this._loggerSleep = new Log(`stream:${type}:sleep`);
+        this._loggerSend = new Logger(`stream:${type}:send`);
+        this._loggerSync = new Logger(`stream:${type}:sync`);
+        this._loggerSleep = new Logger(`stream:${type}:sleep`);
         this._noSleep = noSleep;
     }
     get pts(): number | undefined {
@@ -47,9 +47,7 @@ export class BaseMediaStream extends Writable {
         {
             if (i == 0)
             {
-                this._loggerSync.debug(`Waiting for other stream (%f - %f > %f)`,
-                    this._pts, this.syncStream._pts, this._syncTolerance
-                );
+                this._loggerSync.debug(`Waiting for other stream (${this._pts} - ${this.syncStream._pts} > ${this._syncTolerance})`);
             }
             await setTimeout(1);
             i = (i + 1) % 10;
@@ -76,21 +74,21 @@ export class BaseMediaStream extends Writable {
 
         const sendTime = end - start;
         const ratio = sendTime / frametime;
-        this._loggerSend.debug({
+        this._loggerSend.debug(`Frame sent in ${sendTime.toFixed(2)}ms (${(ratio * 100).toFixed(2)}% frametime)`, {
             stats: {
                 pts: this._pts,
                 frame_size: data.length,
                 duration: sendTime,
                 frametime
             }
-        }, `Frame sent in ${sendTime.toFixed(2)}ms (${(ratio * 100).toFixed(2)}% frametime)`);
+        });
         if (ratio > 1)
         {
-            this._loggerSend.warn({
+            this._loggerSend.warn(`Frame takes too long to send (${(ratio * 100).toFixed(2)}% frametime)`, {
                 frame_size: data.length,
                 duration: sendTime,
                 frametime
-            }, `Frame takes too long to send (${(ratio * 100).toFixed(2)}% frametime)`)
+            });
         }
         let now = performance.now();
         let sleep = Math.max(0, this._pts - this._startPts + frametime - (now - this._startTime));

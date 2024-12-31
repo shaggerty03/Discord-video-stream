@@ -1,6 +1,6 @@
 import LibAV from "@libav.js/variant-webcodecs";
 import pDebounce from "p-debounce";
-import { Log } from "debug-level";
+import { Logger } from "../logger.js";
 import { AVCodecID } from "./LibavCodecId.js";
 import {
     H264Helpers, H264NalUnitTypes,
@@ -185,11 +185,11 @@ libavPromise.then((libav) => {
 const uid = (len = 11) => [...Array(len)].map(() => (Math.random() * 16 | 0).toString(16)).join('');
 
 export async function demux(input: Readable) {
-    const loggerInput = new Log("demux:input");
-    const loggerFormat = new Log("demux:format");
-    const loggerFrameCommon = new Log("demux:frame:common");
-    const loggerFrameVideo = new Log("demux:frame:video");
-    const loggerFrameAudio = new Log("demux:frame:audio");
+    const loggerInput = new Logger("demux:input");
+    const loggerFormat = new Logger("demux:format");
+    const loggerFrameCommon = new Logger("demux:frame:common");
+    const loggerFrameVideo = new Logger("demux:frame:video");
+    const loggerFrameAudio = new Logger("demux:frame:audio");
 
     const libav = await libavPromise;
     const filename = uid();
@@ -256,9 +256,9 @@ export async function demux(input: Readable) {
                 extradata: parsehvcC(Buffer.from(extradata!))
             }
         }
-        loggerFormat.info({
+        loggerFormat.info(`Found video stream in input ${filename}`, {
             info: vInfo
-        }, `Found video stream in input ${filename}`)
+        });
     }
     if (aStream) {
         if (!allowedAudioCodec.has(aStream.codec_id)) {
@@ -271,9 +271,9 @@ export async function demux(input: Readable) {
             codec: aStream.codec_id,
             sample_rate: await libav.AVCodecParameters_sample_rate(aStream.codecpar),
         }
-        loggerFormat.info({
+        loggerFormat.info(`Found audio stream in input ${filename}`, {
             info: aInfo
-        }, `Found audio stream in input ${filename}`)
+        });
     }
 
     const readFrame = pDebounce.promise(async () => {
@@ -314,7 +314,7 @@ export async function demux(input: Readable) {
                 if (status == LibAV.AVERROR_EOF)
                     loggerFrameCommon.info("Reached end of stream. Stopping");
                 else
-                    loggerFrameCommon.info({ status }, "Received an error during frame extraction. Stopping");
+                    loggerFrameCommon.info("Received an error during frame extraction. Stopping", { status });
                 return;
             }
             if (!resume)
