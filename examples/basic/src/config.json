@@ -1,0 +1,13 @@
+{
+    "token": "NzY0NDUxNjQ1NDc1NTIwNTMz.GgeZo4.yIw2hOgezmGLlWX1ENs_UJX49vYkvWUAsQOx8o",
+    "acceptedAuthors": ["686107711829704725", "763792052558626836"],
+    "streamOpts": {
+        "width": 1920,
+        "height": 1080,
+        "fps": 30,
+        "bitrateKbps": 6000,
+        "maxBitrateKbps": 10000,
+        "hardware_acceleration": true,
+        "videoCodec": "H264"
+    }
+}
