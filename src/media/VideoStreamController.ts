@@ -236,8 +236,10 @@ export class VideoStreamController extends EventEmitter {
         '-level:v', '3.0',
         '-maxrate', `${streamOpts.bitrateKbps}k`,
         '-bufsize', `${streamOpts.bitrateKbps * 2}k`,
+        '-minrate', `${Math.floor(streamOpts.bitrateKbps * 0.5)}k`,
+        '-intra-refresh', '1',
         `-g`, `${streamOpts.fps}`,
-        `-x264-params`, `keyint=${streamOpts.fps}:min-keyint=${streamOpts.fps}:scenecut=0`,
+        `-x264-params`, `keyint=${streamOpts.fps}:min-keyint=${streamOpts.fps}:scenecut=0:no-scenecut=1:vbv-init=0.8`,
         '-thread_queue_size', '4096'
       ]);
 
