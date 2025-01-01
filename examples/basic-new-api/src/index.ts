@@ -1,5 +1,6 @@
 import { Client, StageChannel } from "discord.js-selfbot-v13";
 import { Streamer, Utils, NewApi } from "../../../src/index.js";
+import { streamState } from "../../../src/media/newApi.js";
 import config from "./config.json" with {type: "json"};
 
 const VIDEO_PATH = "/home/unicorns/Stuff/LumaUpscaling/SpiritedAway/SpiritedAway.mkv";
@@ -30,6 +31,11 @@ streamer.client.on("messageCreate", async (msg) => {
             await streamer.client.user.voice.setSuppressed(false);
         }
 
+        streamState.currentInput = VIDEO_PATH;
+        streamState.startTime = Date.now()/1000;
+        streamState.isPaused = false;
+        streamState.pausedAt = 0;
+
         const { command, output } = NewApi.prepareStream(VIDEO_PATH, {
             width: config.streamOpts.width,
             height: config.streamOpts.height,
@@ -47,12 +53,30 @@ streamer.client.on("messageCreate", async (msg) => {
     } else if (msg.content.startsWith("$disconnect")) {
         current?.kill("SIGTERM");
         streamer.leaveVoice();
+        streamState.isPaused = false;
+        streamState.currentInput = undefined;
+        streamState.pausedAt = 0;
     } else if(msg.content.startsWith("$stop-stream")) {
         current?.kill("SIGTERM");
+        streamState.isPaused = false;
+        streamState.currentInput = undefined;
+        streamState.pausedAt = 0;
     } else if (msg.content.startsWith("$pause")) {
-        current?.kill("SIGINT");
+        if (!streamState.isPaused && current) {
+            streamState.pausedAt = (Date.now()/1000)-streamState.startTime;
+            streamState.isPaused = true;
+            current.kill("SIGINT");
+            streamer.voiceConnection.udp.mediaConnection.setSpeaking(false);
+        }
     } else if (msg.content.startsWith("$resume")) {
-        current?.kill("SIGCONT");
+        if (streamState.isPaused && streamState.currentInput) {
+            const { command, output } = await NewApi.resumeStream(streamer, streamState.currentInput, streamState.pausedAt);
+            current = command;
+            streamState.startTime = (Date.now()/1000)-streamState.pausedAt;
+            streamState.isPaused = false;
+            await NewApi.playStream(output, streamer)
+                .catch(() => current?.kill("SIGTERM"));
+        }
     }
 });
 
