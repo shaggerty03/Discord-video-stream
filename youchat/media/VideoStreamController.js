@@ -5,6 +5,7 @@ import { MediaUdp } from '../client/voice/MediaUdp.js';
 import { demux } from './LibavDemuxer.js';
 import { VideoStream } from './VideoStream.js';
 import { AudioStream } from './AudioStream.js';
+import * as zmq from 'zeromq';
 
 export type StreamStatus = 'playing' | 'paused' | 'stopped';
 
@@ -42,6 +43,7 @@ export class VideoStreamController extends EventEmitter {
   private currentPosition: number = 0;
   private _status: StreamStatus = 'stopped';
   private currentVolume: number = 1.0; // 100% default volume
+  private zmqSocket?: zmq.Request;
 
   private stats: StreamStats = {
     framesEncoded: 0,
@@ -182,7 +184,7 @@ export class VideoStreamController extends EventEmitter {
       .addInputOption('-analyzeduration', '20000000')
       .addInputOption('-probesize', '100000000')
       .addOption('-stats')
-      .addOption('-loglevel', 'info')
+      .addOption('-loglevel', 'debug')
       .on('start', (commandLine) => {
         console.log('FFmpeg started with command:', commandLine);
       })
@@ -215,12 +217,15 @@ export class VideoStreamController extends EventEmitter {
       this.currentPosition = seekTime;
     }
 
+    const filterComplex = `[0:a:0]aformat=channel_layouts=stereo,aresample=48000[fmt];[fmt]volume=${this.currentVolume}[vol];[vol]azmq[audio_out]`;
+
     this.command
       .output(this.output)
       .outputFormat('matroska')
+      .addOption('-filter_complex', filterComplex)
       .outputOptions([
         '-map', '0:v:0',
-        '-map', '0:a:0?'
+        '-map', '[audio_out]'
       ]);
 
     const streamOpts = this.mediaUdp.mediaConnection.streamOptions;
@@ -244,17 +249,19 @@ export class VideoStreamController extends EventEmitter {
 
     if (includeAudio) {
       this.command
-        .audioChannels(2)
-        .audioFrequency(48000)
         .audioCodec('libopus')
-        .audioBitrate('128k')
-        .audioFilters([`volume=${this.currentVolume}`]);
+        .audioBitrate('128k');
     } else {
       this.command.noAudio();
     }
 
     try {
+      // Run the FFmpeg command
       this.command.run();
+
+      // Initialize ZMQ Socket after starting FFmpeg
+      this.zmqSocket = new zmq.Request();
+      await this.zmqSocket.connect('tcp://127.0.0.1:5555');
 
       const { video, audio } = await demux(this.output);
 
@@ -356,6 +363,12 @@ export class VideoStreamController extends EventEmitter {
   private cleanup() {
     try {
       this.cleanupStreams();
+
+      if (this.zmqSocket) {
+        this.zmqSocket.close();
+        this.zmqSocket = undefined;
+      }
+
       this.mediaUdp.mediaConnection.setSpeaking(false);
       this.mediaUdp.mediaConnection.setVideoStatus(false);
 
@@ -408,5 +421,43 @@ export class VideoStreamController extends EventEmitter {
   async seekByTime(timeStr: string) {
     const seconds = this.parseSeekTime(timeStr);
     await this.seek(seconds);
+  }
+
+  public async setVolume(value: number): Promise<void> {
+    if (!this.zmqSocket) {
+      throw new Error('ZMQ socket is not initialized');
+    }
+    // Send command to change volume
+    const cmd = `volume volume ${value}`;
+    await this.zmqSocket.send(cmd);
+    const [reply] = await this.zmqSocket.receive();
+    console.log('ZMQ reply:', reply.toString());
+    this.currentVolume = value;
+  }
+
+  public async seekZmq(timeStr: string): Promise<void> {
+    if (!this.zmqSocket) {
+      throw new Error('ZMQ socket is not initialized');
+    }
+
+    const targetSeconds = this.parseSeekTime(timeStr);
+    const currentPosition = this.getCurrentPosition();
+    const relativeSeek = targetSeconds - currentPosition;
+    
+    // Format the seek command with relative position
+    const cmd = `seek=${relativeSeek}`;
+    
+    try {
+      await this.zmqSocket.send(cmd);
+      const [reply] = await this.zmqSocket.receive();
+      console.log('ZMQ seek reply:', reply.toString());
+      
+      // Update our internal position tracking
+      this.currentPosition = targetSeconds;
+      this.startTime = (Date.now() / 1000) - targetSeconds;
+    } catch (error) {
+      console.error('Error during ZMQ seek:', error);
+      throw error;
+    }
   }
 }

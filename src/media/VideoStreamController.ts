@@ -217,7 +217,8 @@ export class VideoStreamController extends EventEmitter {
       this.currentPosition = seekTime;
     }
 
-    const filterComplex = `[0:a:0]aformat=channel_layouts=stereo,aresample=48000[fmt];[fmt]volume=${this.currentVolume}[vol];[vol]azmq[audio_out]`;
+    // TODO: Look into using a video filter as well, combined to this for seeking?
+    const filterComplex = `[0:a:0]aformat=channel_layouts=stereo,aresample=48000[fmt];[fmt]volume=${this.currentVolume}[vol];[vol]azmq[audio_out]`
 
     this.command
       .output(this.output)
@@ -427,7 +428,6 @@ export class VideoStreamController extends EventEmitter {
     if (!this.zmqSocket) {
       throw new Error('ZMQ socket is not initialized');
     }
-    // Send command to change volume
     const cmd = `volume volume ${value}`;
     await this.zmqSocket.send(cmd);
     const [reply] = await this.zmqSocket.receive();
