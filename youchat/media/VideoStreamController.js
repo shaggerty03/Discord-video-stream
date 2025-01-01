@@ -42,7 +42,6 @@ export class VideoStreamController extends EventEmitter {
   private currentPosition: number = 0;
   private _status: StreamStatus = 'stopped';
   
-  // Statistics tracking
   private stats: StreamStats = {
     framesEncoded: 0,
     framesDropped: 0,
@@ -68,37 +67,29 @@ export class VideoStreamController extends EventEmitter {
 
   private updateStats(progress: FFmpegProgress) {
     const now = Date.now();
-    const timeDiff = (now - this.lastStatsUpdate) / 1000; // in seconds
+    const timeDiff = (now - this.lastStatsUpdate) / 1000;
 
-    if (timeDiff >= 1) { // Update stats every second
-      // Update frames and FPS (directly from FFmpeg)
+    if (timeDiff >= 1) {
       this.stats.framesEncoded = progress.frames || 0;
       this.stats.currentFps = progress.currentFps || 0;
-      
-      // Update bitrates (directly from FFmpeg)
       this.stats.currentKbps = progress.currentKbps || 0;
-      
-      // Update timestamp and duration
+      this.stats.timestamp = progress.timemark;
       this.stats.timestamp = progress.timemark;
       
-      // Convert timemark (HH:MM:SS.mm) to seconds
       const [timepart, mspart = '0'] = progress.timemark.split('.');
       const [hours, minutes, seconds] = timepart.split(':').map(Number);
       const timeInSeconds = (hours * 3600) + (minutes * 60) + seconds + (Number(mspart) / 100);
       this.stats.duration = timeInSeconds;
 
-      // Calculate average bitrate from total size
-      const totalKbits = (progress.targetSize || 0) * 8; // Convert KB to Kb
+      const totalKbits = (progress.targetSize || 0) * 8;
       this.stats.avgKbps = timeInSeconds > 0 ? 
         Math.round(totalKbits / timeInSeconds) : 
         0;
 
-      // Store values for next update
       this.lastStatsUpdate = now;
       this.lastBytesProcessed = progress.targetSize || 0;
       this.totalBytesProcessed = progress.targetSize || 0;
 
-      // Emit stats update event
       this.emit('statsUpdate', this.getStreamStats());
     }
   }
@@ -108,7 +99,7 @@ export class VideoStreamController extends EventEmitter {
       const oldStatus = this._status;
       this._status = newStatus;
       this.emit('statusChange', { oldStatus, newStatus });
-      this.emit(newStatus); // Emit individual events for each status
+      this.emit(newStatus);
     }
   }
 
@@ -122,7 +113,6 @@ export class VideoStreamController extends EventEmitter {
     this.isPaused = false;
     this.isStopped = false;
     this.startTime = Date.now() / 1000;
-    this.currentPosition = 0;
     await this.startStream(input, includeAudio, 0);
     this.status = 'playing';
   }
@@ -132,25 +122,18 @@ export class VideoStreamController extends EventEmitter {
       return;
     }
 
-    // Store whether we were paused
     const wasPaused = this.isPaused;
-    
-    // Calculate new position
     this.currentPosition = seconds;
-    
-    // Stop current playback
+
     if (this.command) {
       this.command.kill('SIGKILL');
       this.cleanupStreams();
     }
 
-    // Start new stream from seek position
     await this.startStream(this.currentInput!, this.currentIncludeAudio, this.currentPosition);
     
-    // Update timing
     this.startTime = (Date.now() / 1000) - this.currentPosition;
     
-    // If we were paused, pause again
     if (wasPaused) {
       this.pause();
     }
@@ -165,7 +148,6 @@ export class VideoStreamController extends EventEmitter {
       this.pausedAt : 
       (Date.now() / 1000) - this.startTime;
 
-    // Format timestamp as HH:MM:SS
     const hours = Math.floor(seconds / 3600);
     seconds %= 3600;
     const minutes = Math.floor(seconds / 60);
@@ -175,8 +157,6 @@ export class VideoStreamController extends EventEmitter {
   }
 
   private parseStderr(line: string) {
-    // Parse frame stats from lines like:
-    // frame=  129 fps= 30 q=26.0 size=     633kB time=00:00:04.89 bitrate=1060.4kbits/s dup=26 drop=0
     const dropMatch = line.match(/drop=(\d+)/);
     if (dropMatch) {
       this.lastDroppedFrames = parseInt(dropMatch[1]);
@@ -187,7 +167,6 @@ export class VideoStreamController extends EventEmitter {
   private async startStream(input: string, includeAudio: boolean, seekTime: number = 0) {
     this.output = new PassThrough();
 
-    // Reset statistics
     this.stats = {
       framesEncoded: 0,
       framesDropped: 0,
@@ -203,7 +182,6 @@ export class VideoStreamController extends EventEmitter {
     this.lastFrameCount = 0;
     this.lastDroppedFrames = 0;
 
-    // Create FFmpeg command with more robust configuration
     this.command = ffmpeg(input)
       .addInputOption('-re')
       .addInputOption('-hwaccel', 'auto')
@@ -221,7 +199,6 @@ export class VideoStreamController extends EventEmitter {
         this.parseStderr(stderrLine);
       })
       .on('end', () => {
-        // Handle normal end of stream or stop
         if (!this.isPaused) {
           console.log('Stream ended');
           this.isStopped = true;
@@ -229,7 +206,6 @@ export class VideoStreamController extends EventEmitter {
         }
       })
       .on('error', (err, stdout, stderr) => {
-        // Only log and throw errors if they're not from a normal stop/pause operation
         if (!this.isPaused && !this.isStopped && 
             !err.message.includes('Output stream closed') && 
             !err.message.includes('Reached end of stream')) {
@@ -240,22 +216,19 @@ export class VideoStreamController extends EventEmitter {
         }
       });
 
-    // Seek if needed
     if (seekTime > 0) {
       this.command.seekInput(seekTime);
       this.currentPosition = seekTime;
     }
 
-    // Configure output with more explicit options
     this.command
       .output(this.output)
       .outputFormat('matroska')
       .outputOptions([
-        '-map', '0:v:0',  // Select first video stream
-        '-map', '0:a:0?'  // Select first audio stream (if exists)
+        '-map', '0:v:0',
+        '-map', '0:a:0?'
       ]);
 
-    // Configure video
     const streamOpts = this.mediaUdp.mediaConnection.streamOptions;
     this.command
       .size(`${streamOpts.width}x${streamOpts.height}`)
@@ -265,7 +238,7 @@ export class VideoStreamController extends EventEmitter {
       .outputOptions([
         '-tune', 'zerolatency',
         '-pix_fmt', 'yuv420p',
-        '-preset', 'ultrafast',
+        '-preset', streamOpts.h26xPreset,
         '-profile:v', 'baseline',
         '-level:v', '3.0',
         '-maxrate', `${streamOpts.bitrateKbps}k`,
@@ -275,7 +248,6 @@ export class VideoStreamController extends EventEmitter {
         '-thread_queue_size', '4096'
       ]);
 
-    // Configure audio if needed
     if (includeAudio) {
       this.command
         .audioChannels(2)
@@ -287,27 +259,25 @@ export class VideoStreamController extends EventEmitter {
     }
 
     try {
-      // Start the stream
       this.command.run();
 
-      // Set up demuxing
       const { video, audio } = await demux(this.output);
-      
+
       if (!video) {
         throw new Error('No video stream found in input');
       }
 
-      // Set up video stream
       this.videoStream = new VideoStream(this.mediaUdp);
       video.stream.pipe(this.videoStream);
 
-      // Set up audio stream if needed
       if (includeAudio && audio) {
         this.audioStream = new AudioStream(this.mediaUdp);
         audio.stream.pipe(this.audioStream);
+
+        this.videoStream.syncStream = this.audioStream;
+        this.audioStream.syncStream = this.videoStream;
       }
 
-      // Set speaking and video status
       this.mediaUdp.mediaConnection.setSpeaking(includeAudio && !this.isPaused);
       this.mediaUdp.mediaConnection.setVideoStatus(true);
     } catch (error) {
@@ -322,10 +292,8 @@ export class VideoStreamController extends EventEmitter {
       return;
     }
 
-    // Calculate time elapsed since start
     this.pausedAt = (Date.now() / 1000) - this.startTime;
     
-    // Stop the current stream but keep state as paused
     this.isPaused = true;
     this.command.kill('SIGINT');
     this.cleanupStreams();
@@ -339,10 +307,7 @@ export class VideoStreamController extends EventEmitter {
       return;
     }
 
-    // Start a new stream from the paused position
     await this.startStream(this.currentInput, this.currentIncludeAudio, this.pausedAt);
-    
-    // Update the start time to account for the pause duration
     this.startTime = (Date.now() / 1000) - this.pausedAt;
     this.isPaused = false;
     this.status = 'playing';
@@ -355,21 +320,17 @@ export class VideoStreamController extends EventEmitter {
 
     console.log('Stopping stream...');
     
-    // Set stopped state before killing the process
     this.isStopped = true;
 
     try {
-      // Cleanup streams first
       this.cleanupStreams();
       
-      // Then kill FFmpeg if it's still running
       if (this.command) {
-        this.command.kill('SIGKILL');  // Use SIGKILL instead of SIGINT for immediate stop
+        this.command.kill('SIGKILL');
       }
     } catch (error) {
       console.error('Error during stop:', error);
     } finally {
-      // Always perform final cleanup
       this.cleanup();
       this.status = 'stopped';
       console.log('Stream stopped');
@@ -429,4 +390,4 @@ export class VideoStreamController extends EventEmitter {
       this.pausedAt : 
       (Date.now() / 1000) - this.startTime;
   }
-} 
+}

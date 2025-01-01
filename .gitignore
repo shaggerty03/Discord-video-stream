@@ -4,3 +4,4 @@ package-lock.json
 #example/src/config.json
 examples/*/node_modules
 examples/*/dist
+youchat

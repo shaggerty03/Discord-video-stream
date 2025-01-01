@@ -1,4 +1,3 @@
-import { PassThrough } from "stream";
 import { isFiniteNonZero } from "../utils.js";
 import type { SupportedVideoCodec } from "../utils.js";
 import type { MediaUdp, Streamer } from "../client/index.js";
@@ -32,25 +31,25 @@ export async function playStream(
     };
     const mergedOptions = { ...defaultOptions, ...options } as PlayStreamOptions;
 
-    // TODO: Simplify this ugly logic
-    if (!isFiniteNonZero(mergedOptions.width)) {
-        throw new Error("Width must be specified, and be a positive number");
-    }
-    if (!isFiniteNonZero(mergedOptions.height)) {
-        throw new Error("Height must be specified, and be a positive number");
-    }
-    if (!isFiniteNonZero(mergedOptions.frameRate)) {
-        throw new Error("Frame rate must be specified, and be a positive number");
-    }
-    if (!isFiniteNonZero(mergedOptions.bitrateKbps)) {
-        throw new Error("Bitrate must be specified, and be a positive number");
-    }
-    if (!mergedOptions.videoCodec) {
-        throw new Error("Video codec must be specified");
-    }
-    if (!mergedOptions.h26xPreset) {
-        throw new Error("H26x preset must be specified");
-    }
+    const requiredFields = {
+        width: "Width",
+        height: "Height",
+        frameRate: "Frame rate",
+        bitrateKbps: "Bitrate",
+        videoCodec: "Video codec",
+        h26xPreset: "H26x preset"
+    } as const;
+
+    Object.entries(requiredFields).forEach(([field, label]) => {
+        const value = mergedOptions[field as keyof typeof requiredFields];
+        if (["width", "height", "frameRate", "bitrateKbps"].includes(field)) {
+            if (!isFiniteNonZero(value as number)) {
+                throw new Error(`${label} must be specified, and be a positive number`);
+            }
+        } else if (!value) {
+            throw new Error(`${label} must be specified`);
+        }
+    });
 
     let udp: MediaUdp;
     let stopStream: () => void;
