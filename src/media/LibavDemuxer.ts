@@ -225,6 +225,7 @@ export async function demux(input: Readable) {
     const aStream = streams.find((stream) => stream.codec_type == libav.AVMEDIA_TYPE_AUDIO)
     let vInfo: VideoStreamInfo | undefined
     let aInfo: AudioStreamInfo | undefined;
+    // TODO: Originally set to 128, trying 256
     const vPipe = new PassThrough({ objectMode: true, highWaterMark: 128 });
     const aPipe = new PassThrough({ objectMode: true, highWaterMark: 128 });
 

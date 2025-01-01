@@ -2,8 +2,9 @@ import { Client, StageChannel } from "discord.js-selfbot-v13";
 import { Streamer, Utils, NewApi } from "../../../src/index.js";
 import { VideoStreamController } from "../../../src/media/VideoStreamController.js";
 import config from "./config.json" with {type: "json"};
+import ffmpeg from "fluent-ffmpeg";
 
-const VIDEO_PATH = "/home/unicorns/Stuff/LumaUpscaling/SpiritedAway/SpiritedAway.mkv";
+const VIDEO_PATH = "/home/unicorns/TVShows/S01E01.mkv";
 
 const streamer = new Streamer(new Client());
 let videoController: VideoStreamController | null = null;

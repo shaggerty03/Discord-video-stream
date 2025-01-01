@@ -41,6 +41,7 @@ export class VideoStreamController extends EventEmitter {
   private pausedAt: number = 0;
   private currentPosition: number = 0;
   private _status: StreamStatus = 'stopped';
+  private currentVolume: number = 1.0; // 100% default volume
 
   private stats: StreamStats = {
     framesEncoded: 0,
@@ -246,7 +247,8 @@ export class VideoStreamController extends EventEmitter {
         .audioChannels(2)
         .audioFrequency(48000)
         .audioCodec('libopus')
-        .audioBitrate('128k');
+        .audioBitrate('128k')
+        .audioFilters([`volume=${this.currentVolume}`]);
     } else {
       this.command.noAudio();
     }
