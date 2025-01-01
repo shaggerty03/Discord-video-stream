@@ -119,6 +119,12 @@ streamer.client.on("messageCreate", async (msg) => {
         } else {
             msg.reply("Please specify the volume value, e.g., $volume 1.5");
         }
+    } else if (msg.content.startsWith("$newseek ")) {
+        const args = msg.content.split(" ");
+        if (args.length >= 2) {
+            const timeStr = args[1];
+            console.log(`Seeking to ${timeStr}`);
+        }
     }
 });
 
