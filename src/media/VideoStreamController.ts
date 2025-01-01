@@ -123,6 +123,12 @@ export class VideoStreamController extends EventEmitter {
   }
 
   async seek(seconds: number) {
+    // TODO: Look into the future of developing
+    //       a native addon that uses libav to
+    //       seek to a specific time in the stream
+    //       without having to restart the stream
+    //       and re-initialize the ZMQ sockets
+    //       and filters.
     if (this.isStopped) {
       return;
     }
@@ -217,7 +223,6 @@ export class VideoStreamController extends EventEmitter {
       this.currentPosition = seekTime;
     }
 
-    // TODO: Look into using a video filter as well, combined to this for seeking?
     const filterComplex = `[0:a:0]aformat=channel_layouts=stereo,aresample=48000[fmt];[fmt]volume=${this.currentVolume}[vol];[vol]azmq[audio_out]`
 
     this.command
