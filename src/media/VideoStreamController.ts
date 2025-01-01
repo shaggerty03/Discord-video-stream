@@ -439,4 +439,8 @@ export class VideoStreamController extends EventEmitter {
     console.log('ZMQ reply:', reply.toString());
     this.currentVolume = value;
   }
+
+  public async epicSeek(timeStr: string): Promise<number> {
+    throw new Error('Not implemented');
+  }
 }

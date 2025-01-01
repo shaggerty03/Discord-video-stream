@@ -2,7 +2,6 @@ import { Client, StageChannel } from "discord.js-selfbot-v13";
 import { Streamer, Utils, NewApi } from "../../../src/index.js";
 import { VideoStreamController } from "../../../src/media/VideoStreamController.js";
 import config from "./config.json" with {type: "json"};
-import ffmpeg from "fluent-ffmpeg";
 
 const VIDEO_PATH = "/home/unicorns/TVShows/S01E01.mkv";
 
@@ -118,6 +117,15 @@ streamer.client.on("messageCreate", async (msg) => {
             }
         } else {
             msg.reply("Please specify the volume value, e.g., $volume 1.5");
+        }
+    } else if (msg.content.startsWith("$newseek ")) {
+        const args = msg.content.split(" ");
+        if (args.length >= 2) {
+            const timeStr = args[1];
+            if (videoController) {
+                videoController.epicSeek(timeStr);
+                msg.reply(`Seeked to ${timeStr}`);
+            }
         }
     }
 });
