@@ -41,6 +41,7 @@ export class VideoStreamController extends EventEmitter {
   private pausedAt: number = 0;
   private currentPosition: number = 0;
   private _status: StreamStatus = 'stopped';
+  private currentVolume: number = 1.0; // 100% default volume
 
   private stats: StreamStats = {
     framesEncoded: 0,
@@ -70,21 +71,27 @@ export class VideoStreamController extends EventEmitter {
       this.stats.framesEncoded = progress.frames || 0;
       this.stats.currentFps = progress.currentFps || 0;
       this.stats.currentKbps = progress.currentKbps || 0;
-      this.stats.timestamp = progress.timemark;
-      this.stats.timestamp = progress.timemark;
 
       const [timepart, mspart = '0'] = progress.timemark.split('.');
       const [hours, minutes, seconds] = timepart.split(':').map(Number);
-      const timeInSeconds = (hours * 3600) + (minutes * 60) + seconds + (Number(mspart) / 100);
-      this.stats.duration = timeInSeconds;
+      const progressTimeInSeconds = (hours * 3600) + (minutes * 60) + seconds + (Number(mspart) / 100);
+      const totalTimeInSeconds = progressTimeInSeconds + this.currentPosition;
+
+      const totalHours = Math.floor(totalTimeInSeconds / 3600);
+      let remainingSeconds = totalTimeInSeconds % 3600;
+      const totalMinutes = Math.floor(remainingSeconds / 60);
+      remainingSeconds = remainingSeconds % 60;
+      const formattedTimestamp = `${totalHours.toString().padStart(2, '0')}:${totalMinutes.toString().padStart(2, '0')}:${Math.floor(remainingSeconds).toString().padStart(2, '0')}.${mspart}`;
+
+      this.stats.timestamp = formattedTimestamp;
+      this.stats.duration = totalTimeInSeconds;
 
       const totalKbits = (progress.targetSize || 0) * 8;
-      this.stats.avgKbps = timeInSeconds > 0 ?
-        Math.round(totalKbits / timeInSeconds) :
+      this.stats.avgKbps = this.stats.duration > 0 ?
+        Math.round(totalKbits / this.stats.duration) :
         0;
 
       this.lastStatsUpdate = now;
-      //this.lastBytesProcessed = progress.targetSize || 0;
 
       this.emit('statsUpdate', this.getStreamStats());
     }
@@ -119,7 +126,9 @@ export class VideoStreamController extends EventEmitter {
     }
 
     const wasPaused = this.isPaused;
-    this.currentPosition = seconds;
+    const currentPos = this.getCurrentPosition();
+    const newPosition = currentPos + seconds;
+    this.currentPosition = newPosition;
 
     if (this.command) {
       this.command.kill('SIGKILL');
@@ -127,7 +136,6 @@ export class VideoStreamController extends EventEmitter {
     }
 
     await this.startStream(this.currentInput!, this.currentIncludeAudio, this.currentPosition);
-
     this.startTime = (Date.now() / 1000) - this.currentPosition;
 
     if (wasPaused) {
@@ -239,7 +247,8 @@ export class VideoStreamController extends EventEmitter {
         .audioChannels(2)
         .audioFrequency(48000)
         .audioCodec('libopus')
-        .audioBitrate('128k');
+        .audioBitrate('128k')
+        .audioFilters([`volume=${this.currentVolume}`]);
     } else {
       this.command.noAudio();
     }
@@ -278,7 +287,8 @@ export class VideoStreamController extends EventEmitter {
       return;
     }
 
-    this.pausedAt = (Date.now() / 1000) - this.startTime;
+    this.pausedAt = this.getCurrentPosition();
+    this.currentPosition = this.pausedAt;
 
     this.isPaused = true;
     this.command.kill('SIGINT');
@@ -293,8 +303,8 @@ export class VideoStreamController extends EventEmitter {
       return;
     }
 
-    await this.startStream(this.currentInput, this.currentIncludeAudio, this.pausedAt);
-    this.startTime = (Date.now() / 1000) - this.pausedAt;
+    await this.startStream(this.currentInput, this.currentIncludeAudio, this.currentPosition);
+    this.startTime = (Date.now() / 1000) - this.currentPosition;
     this.isPaused = false;
     this.status = 'playing';
   }
@@ -375,5 +385,28 @@ export class VideoStreamController extends EventEmitter {
     return this.isPaused ?
       this.pausedAt :
       (Date.now() / 1000) - this.startTime;
+  }
+
+  private parseSeekTime(seekTime: string): number {
+    const match = seekTime.match(/^(-?\d+)(s|m|h|hr)?$/i);
+    if (!match)
+      throw new Error('Invalid seek time format. Use: number + optional unit (s/m/h/hr). Example: 10s, -5m, 1h');
+    const [, amount, unit = 's'] = match;
+    const value = parseInt(amount, 10);
+    switch (unit.toLowerCase()) {
+      case 'h':
+      case 'hr':
+        return value * 3600;
+      case 'm':
+        return value * 60;
+      case 's':
+      default:
+        return value;
+    }
+  }
+
+  async seekByTime(timeStr: string) {
+    const seconds = this.parseSeekTime(timeStr);
+    await this.seek(seconds);
   }
 }

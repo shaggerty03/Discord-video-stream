@@ -101,22 +101,23 @@ streamer.client.on("messageCreate", async (msg) => {
         } else {
             msg.reply("No stream is currently paused.");
         }
-    } else if (msg.content.startsWith("$seek ")) {
+    } else if (msg.content.startsWith("$volume ")) {
         const args = msg.content.split(" ");
         if (args.length >= 2) {
-            const seekTime = args[1];
-            if (videoController) {
+            const volumeValue = parseFloat(args[1]);
+            if (videoController && !isNaN(volumeValue)) {
                 try {
-                    await videoController.seekByTime(seekTime);
-                    msg.reply(`Stream has been seeked by ${seekTime}.`);
+                    await videoController.setVolume(volumeValue);
+                    msg.reply(`Volume set to ${volumeValue}`);
                 } catch (error) {
-                    msg.reply(error.message);
+                    console.error('Error setting volume:', error);
+                    msg.reply('Failed to set volume.');
                 }
             } else {
-                msg.reply("No stream is currently playing.");
+                msg.reply("Invalid volume value or no stream is currently playing.");
             }
         } else {
-            msg.reply("Please specify the time to seek to, e.g., $seek 60, $seek 5m, $seek -30s, $seek 1h");
+            msg.reply("Please specify the volume value, e.g., $volume 1.5");
         }
     }
 });
