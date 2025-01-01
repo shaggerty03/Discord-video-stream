@@ -103,15 +103,19 @@ streamer.client.on("messageCreate", async (msg) => {
     } else if (msg.content.startsWith("$seek ")) {
         const args = msg.content.split(" ");
         if (args.length >= 2) {
-            const seekTime = parseInt(args[1], 10);
-            if (videoController && !isNaN(seekTime)) {
-                await videoController.seek(seekTime);
-                msg.reply(`Stream has been seeked to ${seekTime} seconds.`);
+            const seekTime = args[1];
+            if (videoController) {
+                try {
+                    await videoController.seekByTime(seekTime);
+                    msg.reply(`Stream has been seeked by ${seekTime}.`);
+                } catch (error) {
+                    msg.reply(error.message);
+                }
             } else {
-                msg.reply("Invalid seek time or no stream is currently playing.");
+                msg.reply("No stream is currently playing.");
             }
         } else {
-            msg.reply("Please specify the time in seconds to seek to, e.g., $seek 60");
+            msg.reply("Please specify the time to seek to, e.g., $seek 60, $seek 5m, $seek -30s, $seek 1h");
         }
     }
 });
