@@ -440,7 +440,7 @@ export class VideoStreamController extends EventEmitter {
     this.currentVolume = value;
   }
 
-  public async epicSeek(timeStr: string): Promise<number> {
-    throw new Error('Not implemented');
+  public async getVolume(): Promise<number> {
+    return this.currentVolume;
   }
 }

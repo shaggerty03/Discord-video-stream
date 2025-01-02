@@ -100,14 +100,15 @@ streamer.client.on("messageCreate", async (msg) => {
         } else {
             msg.reply("No stream is currently paused.");
         }
-    } else if (msg.content.startsWith("$volume ")) {
+    } else if (msg.content.startsWith("$volume")) {
         const args = msg.content.split(" ");
         if (args.length >= 2) {
-            const volumeValue = parseFloat(args[1]);
-            if (videoController && !isNaN(volumeValue)) {
+            const volumePercent = parseFloat(args[1]);
+            if (videoController && !isNaN(volumePercent)) {
                 try {
+                    const volumeValue = volumePercent / 100;
                     await videoController.setVolume(volumeValue);
-                    msg.reply(`Volume set to ${volumeValue}`);
+                    msg.reply(`Volume set to ${volumePercent}%`);
                 } catch (error) {
                     console.error('Error setting volume:', error);
                     msg.reply('Failed to set volume.');
@@ -116,15 +117,12 @@ streamer.client.on("messageCreate", async (msg) => {
                 msg.reply("Invalid volume value or no stream is currently playing.");
             }
         } else {
-            msg.reply("Please specify the volume value, e.g., $volume 1.5");
-        }
-    } else if (msg.content.startsWith("$newseek ")) {
-        const args = msg.content.split(" ");
-        if (args.length >= 2) {
-            const timeStr = args[1];
             if (videoController) {
-                videoController.epicSeek(timeStr);
-                msg.reply(`Seeked to ${timeStr}`);
+                const currentVolume = await videoController.getVolume();
+                const volumePercent = Math.round(currentVolume * 100);
+                msg.reply(`Current volume is ${volumePercent}%`);
+            } else {
+                msg.reply("No stream is currently playing.");
             }
         }
     }
