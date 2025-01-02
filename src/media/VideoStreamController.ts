@@ -42,7 +42,7 @@ export class VideoStreamController extends EventEmitter {
   private pausedAt: number = 0;
   private currentPosition: number = 0;
   private _status: StreamStatus = 'stopped';
-  private currentVolume: number = 1.0; // 100% default volume
+  private currentVolume: number = 1.0;
   private zmqSocket?: zmq.Request;
 
   private stats: StreamStats = {
@@ -262,10 +262,8 @@ export class VideoStreamController extends EventEmitter {
     }
 
     try {
-      // Run the FFmpeg command
       this.command.run();
 
-      // Initialize ZMQ Socket after starting FFmpeg
       this.zmqSocket = new zmq.Request();
       await this.zmqSocket.connect('tcp://127.0.0.1:5555');
 

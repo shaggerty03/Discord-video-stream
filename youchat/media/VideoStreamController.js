@@ -123,6 +123,12 @@ export class VideoStreamController extends EventEmitter {
   }
 
   async seek(seconds: number) {
+    // TODO: Look into the future of developing
+    //       a native addon that uses libav to
+    //       seek to a specific time in the stream
+    //       without having to restart the stream
+    //       and re-initialize the ZMQ sockets
+    //       and filters.
     if (this.isStopped) {
       return;
     }
@@ -217,7 +223,7 @@ export class VideoStreamController extends EventEmitter {
       this.currentPosition = seekTime;
     }
 
-    const filterComplex = `[0:a:0]aformat=channel_layouts=stereo,aresample=48000[fmt];[fmt]volume=${this.currentVolume}[vol];[vol]azmq[audio_out]`;
+    const filterComplex = `[0:a:0]aformat=channel_layouts=stereo,aresample=48000[fmt];[fmt]volume=${this.currentVolume}[vol];[vol]azmq[audio_out]`
 
     this.command
       .output(this.output)
@@ -237,7 +243,7 @@ export class VideoStreamController extends EventEmitter {
       .outputOptions([
         '-tune', 'zerolatency',
         '-pix_fmt', 'yuv420p',
-        '-preset', streamOpts.h26xPreset,
+        '-preset', 'ultrafast',
         '-profile:v', 'baseline',
         '-level:v', '3.0',
         '-maxrate', `${streamOpts.bitrateKbps}k`,
@@ -427,7 +433,6 @@ export class VideoStreamController extends EventEmitter {
     if (!this.zmqSocket) {
       throw new Error('ZMQ socket is not initialized');
     }
-    // Send command to change volume
     const cmd = `volume volume ${value}`;
     await this.zmqSocket.send(cmd);
     const [reply] = await this.zmqSocket.receive();
@@ -435,29 +440,7 @@ export class VideoStreamController extends EventEmitter {
     this.currentVolume = value;
   }
 
-  public async seekZmq(timeStr: string): Promise<void> {
-    if (!this.zmqSocket) {
-      throw new Error('ZMQ socket is not initialized');
-    }
-
-    const targetSeconds = this.parseSeekTime(timeStr);
-    const currentPosition = this.getCurrentPosition();
-    const relativeSeek = targetSeconds - currentPosition;
-    
-    // Format the seek command with relative position
-    const cmd = `seek=${relativeSeek}`;
-    
-    try {
-      await this.zmqSocket.send(cmd);
-      const [reply] = await this.zmqSocket.receive();
-      console.log('ZMQ seek reply:', reply.toString());
-      
-      // Update our internal position tracking
-      this.currentPosition = targetSeconds;
-      this.startTime = (Date.now() / 1000) - targetSeconds;
-    } catch (error) {
-      console.error('Error during ZMQ seek:', error);
-      throw error;
-    }
+  public async getVolume(): Promise<number> {
+    return this.currentVolume;
   }
 }
