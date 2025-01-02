@@ -243,7 +243,7 @@ export class VideoStreamController extends EventEmitter {
       .outputOptions([
         '-tune', 'zerolatency',
         '-pix_fmt', 'yuv420p',
-        '-preset', streamOpts.h26xPreset,
+        '-preset', 'ultrafast',
         '-profile:v', 'baseline',
         '-level:v', '3.0',
         '-maxrate', `${streamOpts.bitrateKbps}k`,
