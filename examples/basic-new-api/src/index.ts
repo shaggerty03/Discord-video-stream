@@ -100,6 +100,47 @@ streamer.client.on("messageCreate", async (msg) => {
         } else {
             msg.reply("No stream is currently paused.");
         }
+    } else if (msg.content.startsWith("$seek-forward")) {
+        const args = msg.content.split(" ");
+        const seconds = args[1] ? parseInt(args[1]) : 10; // Default to 10 seconds
+        if (videoController && videoController.getStatus() === "playing") {
+            try {
+                await videoController.seek(seconds);
+                msg.reply(`Seeked forward ${seconds} seconds.`);
+            } catch (error) {
+                console.error('Error seeking:', error);
+                msg.reply('Failed to seek forward.');
+            }
+        } else {
+            msg.reply("No stream is currently playing.");
+        }
+    } else if (msg.content.startsWith("$seek-backward")) {
+        const args = msg.content.split(" ");
+        const seconds = args[1] ? -parseInt(args[1]) : -10; // Default to 10 seconds
+        if (videoController && videoController.getStatus() === "playing") {
+            try {
+                await videoController.seek(seconds);
+                msg.reply(`Seeked backward ${Math.abs(seconds)} seconds.`);
+            } catch (error) {
+                console.error('Error seeking:', error);
+                msg.reply('Failed to seek backward.');
+            }
+        } else {
+            msg.reply("No stream is currently playing.");
+        }
+    } else if (msg.content.startsWith("$seek-to")) {
+        const args = msg.content.split(" ");
+        if (args.length >= 2 && videoController && videoController.getStatus() === "playing") {
+            try {
+                await videoController.seekByTime(args[1]);
+                msg.reply(`Seeked to ${args[1]}.`);
+            } catch (error) {
+                console.error('Error seeking:', error);
+                msg.reply('Failed to seek. Use format: 10s, 5m, 1h');
+            }
+        } else {
+            msg.reply("Usage: $seek-to <time> (e.g., 10s, 5m, 1h)");
+        }
     } else if (msg.content.startsWith("$volume")) {
         const args = msg.content.split(" ");
         if (args.length >= 2) {
