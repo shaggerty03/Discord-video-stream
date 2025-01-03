@@ -123,32 +123,34 @@ export class VideoStreamController extends EventEmitter {
   }
 
   async seek(seconds: number) {
-    // TODO: Look into the future of developing
-    //       a native addon that uses libav to
-    //       seek to a specific time in the stream
-    //       without having to restart the stream
-    //       and re-initialize the ZMQ sockets
-    //       and filters.
     if (this.isStopped) {
       return;
     }
 
-    const wasPaused = this.isPaused;
     const currentPos = this.getCurrentPosition();
     const newPosition = currentPos + seconds;
-    this.currentPosition = newPosition;
 
+    // Store current state
+    const wasPaused = this.isPaused;
+
+    // Stop current stream
     if (this.command) {
       this.command.kill('SIGKILL');
       this.cleanupStreams();
     }
 
-    await this.startStream(this.currentInput!, this.currentIncludeAudio, this.currentPosition);
-    this.startTime = (Date.now() / 1000) - this.currentPosition;
+    // Start new stream at seek position
+    await this.startStream(this.currentInput!, this.currentIncludeAudio, newPosition);
+    this.startTime = (Date.now() / 1000) - newPosition;
+    this.currentPosition = newPosition;
 
+    // Restore pause state if needed
     if (wasPaused) {
       this.pause();
     }
+
+    // Emit seek event
+    this.emit('seek', { position: newPosition });
   }
 
   getCurrentTimestamp(): string {
@@ -223,24 +225,19 @@ export class VideoStreamController extends EventEmitter {
       this.currentPosition = seekTime;
     }
 
-    const filterComplex = `[0:a:0]aformat=channel_layouts=stereo,aresample=48000[fmt];[fmt]volume=${this.currentVolume}[vol];[vol]azmq[audio_out]`
+    const streamOpts = this.mediaUdp.mediaConnection.streamOptions;
+    const filterComplex = `[0:a:0]aformat=channel_layouts=stereo,aresample=48000[fmt];[fmt]volume=${this.currentVolume}[vol];[vol]azmq[audio_out];[0:v:0]setpts=PTS-STARTPTS,scale=${streamOpts.width}:${streamOpts.height}[video_out]`;
 
     this.command
       .output(this.output)
       .outputFormat('matroska')
       .addOption('-filter_complex', filterComplex)
-      .outputOptions([
-        '-map', '0:v:0',
-        '-map', '[audio_out]'
-      ]);
-
-    const streamOpts = this.mediaUdp.mediaConnection.streamOptions;
-    this.command
-      .size(`${streamOpts.width}x${streamOpts.height}`)
-      .fpsOutput(streamOpts.fps)
-      .videoBitrate(`${streamOpts.bitrateKbps}k`)
       .videoCodec('libx264')
       .outputOptions([
+        '-map', '[video_out]',
+        '-map', '[audio_out]',
+        '-r', `${streamOpts.fps}`,
+        '-b:v', `${streamOpts.bitrateKbps}k`,
         '-tune', 'zerolatency',
         '-pix_fmt', 'yuv420p',
         '-preset', 'ultrafast',
@@ -264,6 +261,7 @@ export class VideoStreamController extends EventEmitter {
     try {
       this.command.run();
 
+      // Initialize ZeroMQ socket for volume control
       this.zmqSocket = new zmq.Request();
       await this.zmqSocket.connect('tcp://127.0.0.1:5555');
 
