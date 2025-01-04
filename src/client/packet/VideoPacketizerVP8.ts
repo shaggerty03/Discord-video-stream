@@ -54,21 +54,14 @@ export class VideoPacketizerVP8 extends BaseMediaPacketizer {
     }
 
     private makeChunk(frameData:any, isFirstPacket: boolean): Buffer {
-        // vp8 payload descriptor
         const payloadDescriptorBuf = Buffer.alloc(2);
-    
         payloadDescriptorBuf[0] = 0x80;
         payloadDescriptorBuf[1] = 0x80;
-        if (isFirstPacket) {
-            payloadDescriptorBuf[0] |= 0b00010000; // mark S bit, indicates start of frame
-        }
-    
-        // vp8 pictureid payload extension
+        if (isFirstPacket)
+            payloadDescriptorBuf[0] |= 0b00010000;
         const pictureIdBuf = Buffer.alloc(2);
-    
         pictureIdBuf.writeUIntBE(this._pictureId, 0, 2);
-        pictureIdBuf[0] |= 0b10000000;
-    
+        pictureIdBuf[0] |= 0b10000000;    
         return Buffer.concat([payloadDescriptorBuf, pictureIdBuf, frameData]);
     }
 }
