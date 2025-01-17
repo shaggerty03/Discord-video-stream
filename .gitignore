@@ -8,3 +8,7 @@ youchat
 build/
 .DS_Store
 *.log
+
+# secrets file crap fuck git
+.env
+backend/src/config.json
