@@ -1,4 +1,7 @@
 import ffmpeg from 'fluent-ffmpeg';
+// TODO: Avoid statically setting the FFmpeg path
+//       It's fine for now, but it's not a good practice
+ffmpeg.setFfmpegPath('/usr/bin/ffmpeg');
 import { PassThrough } from 'stream';
 import { EventEmitter } from 'events';
 import { MediaUdp } from '../client/voice/MediaUdp.js';
@@ -9,6 +12,8 @@ import * as zmq from 'zeromq';
 
 export type StreamStatus = 'playing' | 'paused' | 'stopped';
 
+// TODO: Move FFmpegProgress and StreamStats to their own files
+//       They are only used here
 interface FFmpegProgress {
   frames: number;
   currentFps: number;
@@ -123,6 +128,7 @@ export class VideoStreamController extends EventEmitter {
   }
 
   async seek(seconds: number) {
+    console.log('Seeking to', seconds);
     if (this.isStopped) {
       return;
     }
@@ -130,26 +136,21 @@ export class VideoStreamController extends EventEmitter {
     const currentPos = this.getCurrentPosition();
     const newPosition = currentPos + seconds;
 
-    // Store current state
     const wasPaused = this.isPaused;
 
-    // Stop current stream
     if (this.command) {
-      this.command.kill('SIGKILL');
+      this.command.kill('SIGINT');
       this.cleanupStreams();
     }
 
-    // Start new stream at seek position
     await this.startStream(this.currentInput!, this.currentIncludeAudio, newPosition);
     this.startTime = (Date.now() / 1000) - newPosition;
     this.currentPosition = newPosition;
 
-    // Restore pause state if needed
     if (wasPaused) {
       this.pause();
     }
 
-    // Emit seek event
     this.emit('seek', { position: newPosition });
   }
 
@@ -247,7 +248,8 @@ export class VideoStreamController extends EventEmitter {
         '-bufsize', `${streamOpts.bitrateKbps * 2}k`,
         `-g`, `${streamOpts.fps}`,
         `-x264-params`, `keyint=${streamOpts.fps}:min-keyint=${streamOpts.fps}:scenecut=0`,
-        '-thread_queue_size', '4096'
+        // TODO: This errors
+        // '-thread_queue_size', '4096'
       ]);
 
     if (includeAudio) {
