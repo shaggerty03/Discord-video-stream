@@ -11,9 +11,11 @@ const LEVELS: Record<LogLevel, [number, string, typeof console.log]> = {
 
 export class Logger {
   static globalLevel: LogLevel = 'info';
-  private useColors = this.options.colors ?? process.stdout.isTTY;
+  private useColors: boolean;
 
-  constructor(private namespace: string, private options: { level?: LogLevel, colors?: boolean } = {}) {}
+  constructor(private namespace: string, private options: { level?: LogLevel, colors?: boolean } = {}) {
+    this.useColors = this.options.colors ?? process.stdout.isTTY;
+  }
 
   private log(level: LogLevel, msg: string, meta?: any) {
     if (LEVELS[level][0] >= LEVELS[this.options.level || Logger.globalLevel][0]) {
